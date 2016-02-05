@@ -8,5 +8,5 @@ This is a Linux bash script for the new Mikrotik Dude Server (6.34+)
 * Once the export is completed nfctpget is used to download the DB backup.
 
 * Script usage
-* ./dude_backup.sh IPADDR USERNAME PASSWORD
+./dude_backup.sh IPADDR USERNAME PASSWORD
 
