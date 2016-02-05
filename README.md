@@ -7,3 +7,6 @@ This is a Linux bash script for the new Mikrotik Dude Server (6.34+)
 * The script will then get the dude-store location & vacuum it, once it has vacuumed the DB it will start an export of the DB.
 * Once the export is completed nfctpget is used to download the DB backup.
 
+* Script usage
+* ./dude_backup.sh IPADDR USERNAME PASSWORD
+* 
