@@ -9,4 +9,4 @@ This is a Linux bash script for the new Mikrotik Dude Server (6.34+)
 
 * Script usage
 * ./dude_backup.sh IPADDR USERNAME PASSWORD
-* 
+
