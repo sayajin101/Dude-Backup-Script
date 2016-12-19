@@ -1,13 +1,14 @@
 #!/bin/bash
-
 #--========================================--#
-# Set Varibles	                  		       #
+# Set Varibles			       #
 # Only Change the below varibles you need to #
 #--========================================--#
-sshPort="22";			                           #
-path="/home/backups/dude";                   #
+sshPort="22";				#
+path="/home/backups/dude";		   #
 #--========================================--#
 
+# Check User arguments
+[ -z "${1}" ] || [ -z "${2}" ] || [ -z "${3}" ] && echo -e "\nPlease specify the following arguments\n($(basename $0) IPADDR USERNAME PASSWORD)" && exit 1;
 
 # Check Folder Structure
 [ ! -d "${path}/key" ] || [ ! -d "${path}/logs" ] || [ ! -d "${path}/backups" ] && mkdir -p "${path}"/{key,backups,logs};
@@ -56,10 +57,6 @@ else
 fi;
 
 
-# Check User arguments
-[ -z "${1}" ] || [ -z "${2}" ] || [ -z "${3}" ] && echo -e "\nPlease specify the following arguments\n($(basename $0) IPADDR USERNAME PASSWORD)" && exit 1;
-
-
 # User Credentials
 ip="${1}";
 userName="${2}";
@@ -71,34 +68,67 @@ logFile="${path}/logs/${date}.log";
 rm -f "${logFile}";
 touch "${logFile}";
 
-# Dude Store Folder Path
+# Get Dude Store Folder Path
 dudeStoreDir=$(ssh -4f -p ${sshPort} -i "${path}/key/mikrotik" -o ConnectTimeout="60" -o BatchMode="yes" -o StrictHostKeyChecking="no" ${userName}@"${ip}" ':put [/dude get data-directory];' | tr -d '\r');
+echo "${dudeStoreDir}";
 
+# Dude status function
 dudeServerStatus() {
+	echo "Entering Status Function";
 	[ -n "${counter}" ] && {(( counter++ )) && sleep 15;} || {(( counter++ ));};
+	ncftpls -u ${userName} -p ${passWord} ${ftpURL}/dude/ | grep -c 'dude\.db-';
 	status=$(ssh -4f -p ${sshPort} -i "${path}/key/mikrotik" -o ConnectTimeout="60" -o BatchMode="yes" -o StrictHostKeyChecking="no" ${userName}@"${ip}" ':put [/dude get status]' | tr -d '\r');
 	[ -n "${status}" ] && echo "Status...${status}";
-	if [ `echo -n "${status}" | grep -c '^export done\|^running'` -eq "0" ]; then
-		dudeServerStatus;
-	elif [ `ssh -4f -p ${sshPort} -i "${path}/key/mikrotik" -o ConnectTimeout="60" -o BatchMode="yes" -o StrictHostKeyChecking="no" ${userName}@"${ip}" ':global dudeDIR [/dude get data-directory ]; :if ([:len [/file find name~"^\$dudeDIR-backup-.*.tgz"]] > 0) do={ :put [/dude get status]; };' | tr -d '\r' | grep -c '^export done\|^running'` -eq "0" ]; then
-		dudeServerStatus;
+
+	if [ "${1}" == "stopDude" ]; then
+		if [ `echo -n "${status}" | grep -c ': stopped$'` -eq "0" ]; then
+			[ `ncftpls -u ${userName} -p ${passWord} ${ftpURL}/dude/ | grep -c 'dude\.db-'` -ne "0" ] && dudeServerStatus stopDude;
+		fi;
+	fi;
+	if [ "${1}" == "VacuumDB" ]; then
+		if [ `ncftpls -u ${userName} -p ${passWord} ${ftpURL}/dude/ | grep -c 'dude\.db-'` -ne "0" ]; then
+			[ `ncftpls -u ${userName} -p ${passWord} ${ftpURL}/dude/ | grep -c 'dude\.db-'` -ne "0" ] && dudeServerStatus VacuumDB;
+		fi;
+	fi;
+	if [ "${1}" == "backupFile" ]; then
+		if [ `echo -n "${status}" | grep -c '^export done$'` -eq "0" ]; then
+			[ `ncftpls -u ${userName} -p ${passWord} ${ftpURL}/dude/ | grep -c "^${dudeStoreDir}/dude-backup-${date}-${ip}.tgz$"` -eq "0" ] && dudeServerStatus backupFile;
+		fi;
+	fi;
+	if [ "${1}" == "startDude" ]; then
+		if [ `echo -n "${status}" | grep -c '^running'` -eq "0" ]; then
+			[ `ncftpls -u ${userName} -p ${passWord} ${ftpURL}/dude/ | grep -c 'dude\.db-'` -ne "0" ] && dudeServerStatus startDude;
+		fi;
 	fi;
 }
 
-# Vacuum Dude Database & Create Backup File
-if [ `ssh -4f -p ${sshPort} -i "${path}/key/mikrotik" -o ConnectTimeout="60" -o BatchMode="yes" -o StrictHostKeyChecking="no" ${userName}@"${ip}" ':global dudeDIR [/dude get data-directory]; /file remove [/file find where name~"^$dudeDIR-backup-.*'$ip'.tgz"]; :if ([:len $dudeDIR] > 0) do={ /dude vacuum-db; :delay 10; /dude export-db backup-file="$dudeDIR-backup-'$date'-'$ip'.tgz" }' > /dev/null 2>&1; echo $?` -ne "0" ]; then
-	echo "${ip}, Dude Backup file was not created. - $?" >> ${logFile};
-else
-	echo -e "Dude Server has started Database Vacuum & Export\n";
-	# Goto Backup status function loop
-	dudeServerStatus;
-fi;
+# Stop Dude Service
+echo "Stopping Dude Server";
+ssh -4f -p ${sshPort} -i "${path}/key/mikrotik" -o ConnectTimeout="60" -o BatchMode="yes" -o StrictHostKeyChecking="no" ${userName}@"${ip}" '/dude set enabled=no;';
+dudeServerStatus stopDude;
+
+# Vacuum Dude Database
+echo "Vacuum completed";
+ssh -4f -p ${sshPort} -i "${path}/key/mikrotik" -o ConnectTimeout="60" -o BatchMode="yes" -o StrictHostKeyChecking="no" ${userName}@"${ip}" '/dude vacuum-db;';
+dudeServerStatus vacuumDB;
+
+# Create dude backup file
+echo "Creating Backup File";
+ssh -4f -p ${sshPort} -i "${path}/key/mikrotik" -o ConnectTimeout="60" -o BatchMode="yes" -o StrictHostKeyChecking="no" ${userName}@"${ip}" '/dude export-db backup-file="'${dudeStoreDir}'/dude-backup-'${date}'-'${ip}'.tgz"'
+dudeServerStatus backupFile;
+
+# Start Dude Service
+echo "Starting Dude Service";
+ssh -4f -p ${sshPort} -i "${path}/key/mikrotik" -o ConnectTimeout="60" -o BatchMode="yes" -o StrictHostKeyChecking="no" ${userName}@"${ip}" '/dude set enabled=yes;';
+dudeServerStatus startDude;
 
 # Download Backup to the Backup Directory
+echo "Downloading backup file";
 backupDir="${path}/backups";
 cd ${backupDir};
 echo "Dude Backup is being downloaded";
-ncftpget -u ${userName} -p ${passWord} ${ftpURL}/${dudeStoreDir}-backup-${date}-${ip}.tgz;
+ncftpget -u ${userName} -p ${passWord} ${ftpURL}/${dudeStoreDir}/dude-backup-${date}-${ip}.tgz;
+
 
 # Cleanup
 rm -f ${lockFilePath}/backup_dude;
